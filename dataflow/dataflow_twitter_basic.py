@@ -10,8 +10,8 @@ from apache_beam.options.pipeline_options import GoogleCloudOptions
 
 settings = {
     'gcp': {
-        'project': 'juice-berry-12345',
-        'bucket': 'twitter_data_etl',
+        'project': 'red-velvet-98765',
+        'bucket': 'somebuckethere',
         'region': 'eur4',
         'zone': 'eur4' 
     },

@@ -28,11 +28,11 @@ If you're a total beginner I recommend doing some Qwiklabs or Pluralsight (you c
 
 My _specific_ use case isn't particularly useful, but rather a fun exercise. I wanted to extract data from Twitter and process it with Dataflow with both batch and streaming data. I simply calculated the word and emoji counts as I picked a relatively hard data source in terms of cleaning. The overall process can be applied to other problems that require the processing of data and uploading it to the cloud.
 
-### Introduction to Dataflow & Apache Beam
+## Introduction to Dataflow & Apache Beam
 
 Dataflow allows users to create data processing pipelines for both batch and streaming jobs using a single library - Apache Beam.
 
-#### Benefits of Dataflow
+### Benefits of Dataflow
 
 * single model for both batch and streaming data
 * no vendor lock-in as it uses Apache Beam. You can run Apache Beam jobs locally or with other services that are not GCP
@@ -42,7 +42,7 @@ Dataflow allows users to create data processing pipelines for both batch and str
 
 If you aren't tied to a specific data processing library/tool (eg. Hadoop, Spark, Airflow, etc) then this is a great choice.
 
-#### How it Works (high-level)
+### How it Works (high-level)
 
 Dataflow uses Apache Beam to create pipelines. A Pipeline is a series of data transformation steps with the goal of producing data in a certain format. More specifically these operations in apache beam are:
 1. PTransform - processing to be done on the data (eg. Filter, Map, Combine, GroupByKey, etc)
@@ -83,7 +83,7 @@ with beam.Pipeline() as pipeline:
   )
 ```
 
-#### PTransforms
+### PTransforms
 
 Generally speaking there are two types of PTransforms - **Element-wise** and __Aggregation__
 
@@ -99,7 +99,7 @@ Generally speaking there are two types of PTransforms - **Element-wise** and __A
 
 [To see all the available transforms for Python](https://beam.apache.org/documentation/transforms/python/overview/)
 
-##### ParDo
+#### ParDo
 
 If you want to run a custom element-wise transformation on your PCollection then you use a ParDo.
 Simply inherit `beam.DoFn` and create a custom class then write the logic in the `process()` method.
@@ -110,7 +110,7 @@ class ExtractWordFromTweets(beam.DoFn):
         return element.split(" ")
 ```
 
-##### Map vs. FlatMap?
+#### Map vs. FlatMap?
 
 Yes, I didn't understand the difference either until I saw a particular example.
 
@@ -130,13 +130,13 @@ with beam.Pipeline() as pipeline:
   )
 ```
 
-#### Inputs and Outputs
+### Inputs and Outputs
 
 I only used the TextIO and PubSubIO connectors, but there are plenty oters available. They vary depending on the SDK you're using.
 
 [Built in I/O connectors](https://beam.apache.org/documentation/io/built-in/)
 
-#### Pipeline Options
+### Pipeline Options
 
 When you create your pipeline object you need to provide it configuration parameters. There are a few ways of doing this. The most common way I've seen examples is to configure an argparser and pass in arguments when running the pipeline via command line.
 
@@ -157,13 +157,13 @@ The runner tells apache beam which environment to execute the pipeline. In the c
 
 [More information about configurations and other things you should be aware of when using the Dataflow runner](https://beam.apache.org/documentation/runners/dataflow/)
 
-### Intro to Streaming
+## Intro to Streaming
 
 When creating pipeline for streaming data you can use the same model as before. You only need to provide one configuration change to the pipeline options and you're ready to go!
 
 `pipeline_options.view_as(StandardOptions).streaming = True`
 
-#### Windows
+### Windows
 
 In order to perform calculations and aggregations on unbounded data, we need to specify timeframes to split the data so that we can process them in a similar way to batch data. Windows is used to achieve this!
 
@@ -181,7 +181,8 @@ If you want to account for lags of data, as in data that was due to arrive at a 
 
 [More on windowing](https://beam.apache.org/documentation/programming-guide/#windowing)
 
-### Issues / Problems I faced and Tips (WIP)
+
+## Issues / Problems I faced and Tips (WIP)
 
 * Run things with the DirectRunner whilst you're developing to get used to things. Deploying pipelines to Dataflow always takes a minute or so to prepare everything.
 * You can provide a requirements.txt file to download packages not already available on workers
@@ -189,7 +190,7 @@ If you want to account for lags of data, as in data that was due to arrive at a 
   * [Packages the workers have](https://cloud.google.com/dataflow/docs/concepts/sdk-worker-dependencies)
 
 
-### Other Info (WIP)
+## Other Info (WIP)
 
 **Dataflow Setup Process**
 1. This is the graph construction time phase - Dataflow creates an execution graph from your code

@@ -1,2 +1,3 @@
-# cloud
-practice with cloud related things!
+# Google Cloud
+
+My repo of code and notes on GCP 

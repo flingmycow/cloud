@@ -1,0 +1,222 @@
+# List objects in the bucket provided as an argument (the bucket stores images in a prefix - change this to your own"
+# For each image send it to the vision API for label detection
+# Write each label and it's score to datastore
+
+main:
+  params: [args]
+  steps:
+    - initVariables:
+        assign:
+          - project: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
+          - zone: "europe-west2"
+          - prefix: "image_classification"
+    - missingParamsCheck:
+        switch:
+          - condition: ${not("bucket" in args)}
+            next: bucketMissing
+        next: getBucketItems
+    - bucketMissing:
+          assign:
+            - bucket: "my-gcs-bucket"
+    - getBucketItems:
+        try:
+          call: http.get
+          args:
+            url: ${"https://storage.googleapis.com/storage/v1/b/"+bucket+"/o"}
+            auth:
+                type: OAuth2
+            query:
+              prefix: ${prefix}
+              fields: items/name, items/bucket, items/contentType, items/timeCreated
+          result: bucketFilesInfo
+        except:
+          as: exception_dict
+          steps:
+            - handleGCSBucketError:
+                switch:
+                  - condition: ${exception_dict.code == 404}
+                    raise: "Bucket not found"
+                  - condition: ${exception_dict.code == 403}
+                    raise: "Error authenticating to GCP"
+            - unhandledException:
+                raise: ${exception_dict}
+    - logGetBucketItems:
+        call: sys.log
+        args:
+          text: ${"The bucket contains these files and their metadata = " + json.encode_to_string(bucketFilesInfo)}
+          severity: INFO
+    - setupSubworkflowLoop:
+        assign:
+          - i: 0
+          - result: ""
+    - logFirstLoopIteration:
+        call: sys.log
+        args:
+          text: ${"The first subworkflow loop index is = " + string(i) + " and the first image is = " + json.encode_to_string(bucketFilesInfo.body.items[int(i)])}
+          severity: INFO 
+    - subworkflowCondition:
+        switch:
+          - condition: ${len(bucketFilesInfo.body.items) == int(i+1)} # the next condition throws an error on the last index
+            next: outputResults
+          - condition: ${bucketFilesInfo.body.items[int(i)].contentType != "image/jpeg" AND bucketFilesInfo.body.items[int(i)].contentType != "image/png"}
+            next: skipNonImageType
+          - condition: ${len(bucketFilesInfo.body.items) > int(i)}
+            next: callVisionDatastoreSubworkflow
+        next: outputResults
+    - skipNonImageType:
+        assign:
+          - i: ${i+1}
+        next: subworkflowCondition
+    - callVisionDatastoreSubworkflow:
+        call: sendVisionAPIRequest
+        args:
+            project: ${project}
+            bucket: ${bucket}
+            bucketFilesInfo: ${bucketFilesInfo}
+            index: ${i}
+        result: i
+        next: logFirstLoopIteration
+    - outputResults:
+        return: ${result}
+
+sendVisionAPIRequest:
+  params: [project, bucket, bucketFilesInfo, index]
+  steps:
+    - createVisionAPIFeaturesDict:
+        assign:
+          - visionFeatures:
+              source:
+                  imageUri: ${"gs://" + bucket + "/" + bucketFilesInfo.body.items[index].name}
+    - createImageDict:
+        assign:
+            - features: [
+                    type: "LABEL_DETECTION"
+                    maxResults: 5]
+    - createVisionAPIDict:
+        assign:
+            - requestsDict:
+                requests: [
+                  features: ${features}
+                  image: ${visionFeatures}]
+    - logURLDict:
+        call: sys.log
+        args:
+          text: ${"The request json for the vision API = " + json.encode_to_string(requestsDict)}
+          severity: INFO
+    - classifyImages:
+        try:
+          call: http.post
+          args:
+            url: ${"https://vision.googleapis.com/v1/images:annotate"}
+            auth:
+              type: OAuth2
+            body: ${requestsDict}
+          result: imageClassified
+        except:
+          as: visionError
+          steps:
+            - handleVisionError:
+                raise: ${visionError}
+    - setupDatastoreWriteLoop:
+        assign:
+          - iter: 0
+          - result: ""
+    - logBeforeDatastoreLoop:
+        call: sys.log
+        args:
+          text: ${"Loop iteration = " + string(iter) + " for image " + json.encode_to_string(requestsDict.requests[0].image)}
+          severity: INFO
+        next: logBeforeDatastoreLoop2
+    - logBeforeDatastoreLoop2:
+        call: sys.log
+        args:
+          text: ${"length of imageClassified.body.responses[0].labelAnnotations = " + string(len(imageClassified.body.responses[0].labelAnnotations)) + " and imageClassified = " + json.encode_to_string(imageClassified)}
+          severity: INFO
+        next: tempSleep
+    - tempSleep:
+        call: sys.sleep
+        args:
+          seconds: 5
+        next: datastoreCheckCondition
+    - datastoreCheckCondition:
+        switch:
+          - condition: ${len(imageClassified.body.responses[0].labelAnnotations) > int(iter)}
+            next: callDatastoreSubworkflow
+        next: outputResults
+    - callDatastoreSubworkflow:
+        call: datastoreRequest
+        args:
+            project: ${project}
+            visionDict: ${visionFeatures}
+            visionResult: ${imageClassified}
+            iter: ${iter}
+            result: ${result}
+        result: iter
+        next: logBeforeDatastoreLoop
+    - outputResults:
+        return: ${index+1}
+
+datastoreRequest:
+  params: [project, visionDict, visionResult, iter, result]
+  steps:
+    - startDatastoreRequest:
+        try:
+          call: http.post
+          args:
+            url: ${"https://datastore.googleapis.com/v1/projects/"+project+":beginTransaction"}
+            auth:
+              type: OAuth2
+          result: datastoreTransactionID
+        except:
+          as: firstDatastoreError
+          steps:
+          - raiseTransactionError:
+                raise: ${firstDatastoreError.body}
+    - getCurrentTime:
+        call: http.get
+        args:
+          url: http://worldclockapi.com/api/json/utc/now
+        result: currentTime
+    - writeToDatastore:
+        try:
+          call: http.post
+          args:
+            url: ${"https://datastore.googleapis.com/v1/projects/"+project+":commit"}
+            auth:
+              type: OAuth2
+            body:
+              mutations:
+                insert: 
+                  key:
+                      path: 
+                          kind: "image_annotation"
+                      partitionId:
+                          projectId: ${project}
+                          namespaceId: "workflows-gcs"
+                  properties: 
+                      gcs_link:
+                          stringValue: ${visionDict.source.imageUri}
+                      current_time:
+                          stringValue: ${currentTime.body.currentDateTime}
+                      annotations:
+                          stringValue: ${visionResult.body.responses[0].labelAnnotations[iter].description}
+                      annotation_array:
+                          arrayValue: 
+                              values: 
+                                entityValue:
+                                  properties: 
+                                    description: 
+                                      stringValue: ${visionResult.body.responses[0].labelAnnotations[iter].description}
+                                    score:
+                                      doubleValue: ${visionResult.body.responses[0].labelAnnotations[iter].score}
+                                    topicality:
+                                      doubleValue: ${visionResult.body.responses[0].labelAnnotations[iter].topicality}      
+              transaction: ${datastoreTransactionID.body.transaction}
+          result: datastoreResult
+        except:
+          as: datastoreError
+          steps:
+            - raiseDatastoreError:
+                raise: ${datastoreError.body}
+    - returnResults:
+        return: ${iter+1}
